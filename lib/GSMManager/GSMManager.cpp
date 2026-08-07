@@ -28,8 +28,9 @@ bool GSMManager::begin(HardwareSerial* serialPort, int rxPin, int txPin, long ba
 String GSMManager::sendCommand(String command, uint32_t timeout) {
     if (!_serial) return "";
 
+    // Clear input buffer
     while (_serial->available()) {
-        _serial->read(); // Flush input buffer
+        _serial->read();
     }
 
     _serial->println(command);
@@ -41,6 +42,15 @@ String GSMManager::sendCommand(String command, uint32_t timeout) {
             char c = _serial->read();
             response += c;
         }
+        
+        // Early break if response completes
+        if (response.indexOf("OK\r") != -1 || 
+            response.indexOf("ERROR\r") != -1 || 
+            response.indexOf("+CMS ERROR") != -1 || 
+            response.indexOf("+CME ERROR") != -1) {
+            break;
+        }
+        delay(10);
     }
 
     return response;
@@ -57,6 +67,7 @@ bool GSMManager::waitForResponse(String target, uint32_t timeout) {
                 return true;
             }
         }
+        delay(10);
     }
     return false;
 }
@@ -66,7 +77,7 @@ void GSMManager::update() {
 
     unsigned long currentMillis = millis();
 
-    // --- State Machine ---
+    // --- Non-blocking State Machine ---
     switch (_state) {
         case GSM_STATE_UNINITIALIZED:
             break;
@@ -95,12 +106,12 @@ void GSMManager::update() {
         }
 
         case GSM_STATE_READY: {
-            // Periodic health check every 45 seconds to verify SIM800L is still responsive
+            // Periodic health check every 45s
             if (currentMillis - _lastHealthCheck >= 45000) {
                 _lastHealthCheck = currentMillis;
                 String resp = sendCommand("AT", 1000);
                 if (resp.indexOf("OK") == -1) {
-                    Serial.println("[GSM]\nModule unresponsive! Triggering re-initialization...");
+                    Serial.println("[GSM]\nModule unresponsive! Re-initializing...");
                     _state = GSM_STATE_CHECK_AT;
                     _lastStateTimer = currentMillis;
                     return;
@@ -118,12 +129,11 @@ void GSMManager::update() {
             break;
     }
 
-    // --- Stream Incoming Data Parsing (+CMTI or direct notification) ---
+    // --- Stream Incoming SMS Detector (+CMTI: "SM",3) ---
     while (_serial->available()) {
         String line = _serial->readStringUntil('\n');
         line.trim();
 
-        // Detect SMS notification: +CMTI: "SM",3
         int cmtiIdx = line.indexOf("+CMTI:");
         if (cmtiIdx != -1) {
             int commaIdx = line.indexOf(",", cmtiIdx);
@@ -135,12 +145,19 @@ void GSMManager::update() {
         }
     }
 
-    // Process queued SMS indexes into SMSMessage objects
+    // Read queued SMS indexes
     if (!_pendingSMSIndexes.empty() && _state == GSM_STATE_READY) {
         int targetIdx = _pendingSMSIndexes.front();
         _pendingSMSIndexes.pop();
 
+        // Give SIM800L 200ms to settle memory index write
+        delay(200);
+
         String raw = sendCommand("AT+CMGR=" + String(targetIdx), 3000);
+        
+        Serial.println("[GSM] Debug CMGR Raw Response:");
+        Serial.println(raw);
+
         if (raw.indexOf("+CMGR:") != -1) {
             SMSMessage msg = parseCMGRResponse(targetIdx, raw);
             if (msg.phone.length() > 0) {
@@ -166,39 +183,49 @@ SMSMessage GSMManager::parseCMGRResponse(int index, String raw) {
     sms.message = "";
     sms.datetime = "";
 
-    // Header structure: +CMGR: "REC UNREAD","+628123456789","","26/08/07,21:00:00+28"
-    int firstQuote = raw.indexOf("\"");
+    int cmgrPos = raw.indexOf("+CMGR:");
+    if (cmgrPos == -1) {
+        return sms;
+    }
+
+    // Locate quotes relative to +CMGR:
+    int firstQuote  = raw.indexOf("\"", cmgrPos);
     int secondQuote = raw.indexOf("\"", firstQuote + 1);
-    int thirdQuote = raw.indexOf("\"", secondQuote + 1);
+    int thirdQuote  = raw.indexOf("\"", secondQuote + 1);
     int fourthQuote = raw.indexOf("\"", thirdQuote + 1);
 
     if (thirdQuote != -1 && fourthQuote != -1) {
         sms.phone = raw.substring(thirdQuote + 1, fourthQuote);
+        sms.phone.trim();
     }
 
-    // Parse date/time (7th and 8th quotes)
+    // Locate timestamp quotes (5th & 6th or 7th & 8th)
     int fifthQuote = raw.indexOf("\"", fourthQuote + 1);
     int sixthQuote = raw.indexOf("\"", fifthQuote + 1);
     int seventhQuote = raw.indexOf("\"", sixthQuote + 1);
     int eighthQuote = raw.indexOf("\"", seventhQuote + 1);
 
+    String rawTime = "";
     if (seventhQuote != -1 && eighthQuote != -1) {
-        String rawTime = raw.substring(seventhQuote + 1, eighthQuote);
-        // Convert "YY/MM/DD,HH:MM:SS+TZ" to "20YY-MM-DD HH:MM:SS"
-        if (rawTime.length() >= 17) {
-            String year = "20" + rawTime.substring(0, 2);
-            String month = rawTime.substring(3, 5);
-            String day = rawTime.substring(6, 8);
-            String time = rawTime.substring(9, 17);
-            sms.datetime = year + "-" + month + "-" + day + " " + time;
-        }
+        rawTime = raw.substring(seventhQuote + 1, eighthQuote);
+    } else if (fifthQuote != -1 && sixthQuote != -1) {
+        rawTime = raw.substring(fifthQuote + 1, sixthQuote);
     }
 
-    // Parse body text
-    int headerEnd = raw.indexOf("\r\n", raw.indexOf("+CMGR:"));
+    if (rawTime.length() >= 17) {
+        // Convert "YY/MM/DD,HH:MM:SS+TZ" to "20YY-MM-DD HH:MM:SS"
+        String year = "20" + rawTime.substring(0, 2);
+        String month = rawTime.substring(3, 5);
+        String day = rawTime.substring(6, 8);
+        String time = rawTime.substring(9, 17);
+        sms.datetime = year + "-" + month + "-" + day + " " + time;
+    }
+
+    // Parse message body text (line after header)
+    int headerEnd = raw.indexOf("\n", cmgrPos);
     if (headerEnd != -1) {
-        String body = raw.substring(headerEnd + 2);
-        int okIdx = body.indexOf("\r\nOK");
+        String body = raw.substring(headerEnd + 1);
+        int okIdx = body.indexOf("OK");
         if (okIdx != -1) {
             body = body.substring(0, okIdx);
         }
@@ -243,7 +270,7 @@ bool GSMManager::sendSMS(String number, String message) {
     delay(300);
 
     _serial->print(message);
-    _serial->write(26); // CTRL+Z
+    _serial->write(26);
 
     return waitForResponse("OK", 5000);
 }
