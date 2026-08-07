@@ -25,17 +25,8 @@ class DeviceHeartbeatRequest extends FormRequest
             'token' => ['nullable', 'string', 'max:64'],
             'signal' => ['nullable', 'integer', 'between:0,31'],
             'operator' => ['nullable', 'string', 'max:64'],
-        ];
-    }
-
-    /**
-     * Custom validation messages.
-     */
-    public function messages(): array
-    {
-        return [
-            'signal.between' => 'Signal strength must be between 0 and 31.',
-            'operator.max' => 'Operator name cannot exceed 64 characters.',
+            'sim_status' => ['nullable', 'string', 'max:64'],
+            'reg_status' => ['nullable', 'string', 'max:64'],
         ];
     }
 }

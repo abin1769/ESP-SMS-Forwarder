@@ -28,7 +28,6 @@ bool ApiClient::sendSMS(SMSMessage sms) {
     http.addHeader("Content-Type", "application/json");
     http.addHeader("X-Device-Token", _token);
 
-    // Escape special characters in message for valid JSON
     String escapedMsg = sms.message;
     escapedMsg.replace("\\", "\\\\");
     escapedMsg.replace("\"", "\\\"");
@@ -36,7 +35,6 @@ bool ApiClient::sendSMS(SMSMessage sms) {
     escapedMsg.replace("\r", "\\r");
     escapedMsg.replace("\t", "\\t");
 
-    // Construct JSON body
     String payload = "{";
     payload += "\"token\":\"" + _token + "\",";
     payload += "\"phone\":\"" + sms.phone + "\",";
@@ -54,7 +52,7 @@ bool ApiClient::sendSMS(SMSMessage sms) {
         success = true;
     } else {
         if (httpCode > 0) {
-            Serial.printf("[API]\nHTTP Error %d: %s\n", httpCode, http.getString().c_str());
+            Serial.printf("[API]\nHTTP Error %d\n", httpCode);
         } else {
             Serial.printf("[API]\nHTTP POST Connection Failed: %s\n", http.errorToString(httpCode).c_str());
         }
@@ -65,18 +63,17 @@ bool ApiClient::sendSMS(SMSMessage sms) {
     return success;
 }
 
-bool ApiClient::heartbeat(int signal, String operatorName) {
+bool ApiClient::heartbeat(int signal, String operatorName, String simStatus, String regStatus, String &outPendingCommand) {
+    outPendingCommand = "";
+
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[API]\nHeartbeat failed: WiFi Disconnected");
         return false;
     }
 
     HTTPClient http;
     String endpoint = _baseUrl + "/api/device/heartbeat";
 
-    Serial.println("[API]\nPOST Heartbeat...");
     http.begin(endpoint);
-
     http.addHeader("Content-Type", "application/json");
     http.addHeader("X-Device-Token", _token);
 
@@ -86,22 +83,73 @@ bool ApiClient::heartbeat(int signal, String operatorName) {
     String payload = "{";
     payload += "\"token\":\"" + _token + "\",";
     payload += "\"signal\":" + String(signal) + ",";
-    payload += "\"operator\":\"" + escapedOp + "\"";
+    payload += "\"operator\":\"" + escapedOp + "\",";
+    payload += "\"sim_status\":\"" + simStatus + "\",";
+    payload += "\"reg_status\":\"" + regStatus + "\"";
     payload += "}";
 
     int httpCode = http.POST(payload);
-    bool success = false;
+    bool success = (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED);
 
-    if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED) {
-        Serial.printf("[API]\nHTTP %d\n", httpCode);
-        success = true;
-    } else {
-        if (httpCode > 0) {
-            Serial.printf("[API]\nHTTP Error %d\n", httpCode);
-        } else {
-            Serial.printf("[API]\nHeartbeat Failed: %s\n", http.errorToString(httpCode).c_str());
+    if (success) {
+        String respBody = http.getString();
+        // Check if backend queued a pending AT command
+        int cmdKey = respBody.indexOf("\"pending_command\":\"");
+        if (cmdKey != -1) {
+            int startIdx = cmdKey + 19;
+            int endIdx = respBody.indexOf("\"", startIdx);
+            if (endIdx != -1) {
+                outPendingCommand = respBody.substring(startIdx, endIdx);
+                // Unescape backslashes if any
+                outPendingCommand.replace("\\\"", "\"");
+                outPendingCommand.replace("\\\\", "\\");
+            }
         }
-        success = false;
+        Serial.printf("[API]\nHeartbeat HTTP %d\n", httpCode);
+    }
+
+    http.end();
+    return success;
+}
+
+bool ApiClient::sendATResponse(String command, String response) {
+    if (WiFi.status() != WL_CONNECTED) {
+        return false;
+    }
+
+    HTTPClient http;
+    String endpoint = _baseUrl + "/api/device/command-response";
+
+    http.begin(endpoint);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-Device-Token", _token);
+
+    // Escape special characters in command & response
+    String escCmd = command;
+    escCmd.replace("\\", "\\\\");
+    escCmd.replace("\"", "\\\"");
+
+    String escResp = response;
+    escResp.replace("\\", "\\\\");
+    escResp.replace("\"", "\\\"");
+    escResp.replace("\n", "\\n");
+    escResp.replace("\r", "\\r");
+    escResp.replace("\t", "\\t");
+
+    String payload = "{";
+    payload += "\"token\":\"" + _token + "\",";
+    payload += "\"command\":\"" + escCmd + "\",";
+    payload += "\"response\":\"" + escResp + "\"";
+    payload += "}";
+
+    Serial.println("[API] Sending AT Command Execution Output to Laravel...");
+    int httpCode = http.POST(payload);
+    bool success = (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED);
+
+    if (success) {
+        Serial.printf("[API] AT Response Sent OK (HTTP %d)\n", httpCode);
+    } else {
+        Serial.printf("[API] Failed to send AT Response (HTTP %d)\n", httpCode);
     }
 
     http.end();

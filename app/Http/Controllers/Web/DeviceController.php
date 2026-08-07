@@ -7,6 +7,7 @@ use App\Http\Requests\Web\StoreDeviceRequest;
 use App\Http\Requests\Web\UpdateDeviceRequest;
 use App\Models\Device;
 use App\Services\DeviceService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Contracts\View\View;
@@ -27,6 +28,14 @@ class DeviceController extends Controller
         $deviceStats = $this->deviceService->getDeviceStats();
 
         return view('devices.index', compact('devices', 'search', 'deviceStats'));
+    }
+
+    /**
+     * Display detailed GSM debug console for device.
+     */
+    public function show(Device $device): View
+    {
+        return view('devices.show', compact('device'));
     }
 
     /**
@@ -72,5 +81,47 @@ class DeviceController extends Controller
 
         return redirect()->route('devices.index')
             ->with('success', "New token generated for '{$device->name}': {$newToken}");
+    }
+
+    /**
+     * Queue custom AT Command to be executed by ESP32.
+     */
+    public function sendCommand(Request $request, Device $device): RedirectResponse|JsonResponse
+    {
+        $request->validate([
+            'command' => ['required', 'string', 'max:255'],
+        ]);
+
+        $command = trim($request->input('command'));
+        $this->deviceService->queueCommand($device, $command);
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => "AT Command '{$command}' queued for {$device->name}.",
+            ]);
+        }
+
+        return redirect()->back()
+            ->with('success', "AT Command '{$command}' queued for {$device->name}. ESP32 will execute it shortly.");
+    }
+
+    /**
+     * Get real-time command response and status via AJAX.
+     */
+    public function getCommandStatus(Device $device): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'is_online' => $device->is_online,
+            'signal' => $device->signal,
+            'operator' => $device->operator ?? 'UNKNOWN',
+            'sim_status' => $device->sim_status ?? 'UNKNOWN',
+            'reg_status' => $device->reg_status ?? 'UNKNOWN',
+            'pending_command' => $device->pending_command,
+            'command_response' => $device->command_response ?? 'No AT Command output recorded yet.',
+            'command_updated_at' => $device->command_updated_at ? $device->command_updated_at->format('d/m/Y H:i:s') : null,
+            'last_seen_human' => $device->last_seen ? $device->last_seen->diffForHumans() : 'Never',
+        ]);
     }
 }

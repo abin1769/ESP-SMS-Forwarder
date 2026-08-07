@@ -16,7 +16,8 @@ public:
 
     void begin(String baseUrl, String token);
     bool sendSMS(SMSMessage sms);
-    bool heartbeat(int signal, String operatorName);
+    bool heartbeat(int signal, String operatorName, String simStatus, String regStatus, String &outPendingCommand);
+    bool sendATResponse(String command, String response);
 };
 
 #endif // API_CLIENT_H

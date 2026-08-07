@@ -97,6 +97,11 @@
                             </td>
                             <td class="text-end">
                                 <div class="btn-group btn-group-sm">
+                                    <!-- GSM Debug Console Button -->
+                                    <a href="{{ route('devices.show', $device) }}" class="btn btn-light border text-primary" title="GSM Live Terminal & Debugging">
+                                        <i class="bi bi-terminal-fill"></i>
+                                    </a>
+
                                     <!-- Edit Button -->
                                     <button class="btn btn-light border btn-edit-device" 
                                             data-bs-toggle="modal" 

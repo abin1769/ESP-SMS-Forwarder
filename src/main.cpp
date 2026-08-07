@@ -37,7 +37,25 @@ void loop() {
 
         int signal = gsm.getSignal();
         String opName = gsm.getOperator();
-        api.heartbeat(signal, opName);
+        String simStatus = gsm.getSIMStatus();
+        String regStatus = gsm.getRegistrationStatus();
+        String pendingCmd = "";
+
+        // Send heartbeat & receive any pending remote AT command from Web Console
+        bool hbSuccess = api.heartbeat(signal, opName, simStatus, regStatus, pendingCmd);
+
+        if (hbSuccess && pendingCmd.length() > 0) {
+            Serial.println("\n[Remote Console] Received AT Command from Web:");
+            Serial.println("> " + pendingCmd);
+
+            String result = gsm.executeCustomAT(pendingCmd, 3000);
+
+            Serial.println("[Remote Console] SIM800L Execution Result:");
+            Serial.println(result);
+
+            // Report execution result back to Laravel Web Console
+            api.sendATResponse(pendingCmd, result);
+        }
     }
 
     // 3. SMS Detection & Forwarding Flow

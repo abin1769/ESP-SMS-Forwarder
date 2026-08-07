@@ -52,6 +52,9 @@ public:
     bool sendSMS(String number, String message);
     int getSignal();
     String getOperator();
+    String getSIMStatus();
+    String getRegistrationStatus();
+    String executeCustomAT(String command, uint32_t timeout = 3000);
 };
 
 #endif // GSM_MANAGER_H

@@ -22,6 +22,11 @@ class Device extends Model
         'status',
         'signal',
         'operator',
+        'sim_status',
+        'reg_status',
+        'pending_command',
+        'command_response',
+        'command_updated_at',
         'last_seen',
     ];
 
@@ -34,6 +39,7 @@ class Device extends Model
     {
         return [
             'last_seen' => 'datetime',
+            'command_updated_at' => 'datetime',
             'signal' => 'integer',
         ];
     }

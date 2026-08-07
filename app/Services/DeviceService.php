@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Device;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Carbon;
 
 class DeviceService
 {
@@ -73,10 +72,15 @@ class DeviceService
     }
 
     /**
-     * Process heartbeat signal from ESP32.
+     * Process heartbeat signal from ESP32, updating signal, operator, sim_status, reg_status.
      */
-    public function handleHeartbeat(Device $device, ?int $signal = null, ?string $operator = null): Device
-    {
+    public function handleHeartbeat(
+        Device $device,
+        ?int $signal = null,
+        ?string $operator = null,
+        ?string $simStatus = null,
+        ?string $regStatus = null
+    ): Device {
         $updateData = [
             'status' => 'online',
             'last_seen' => now(),
@@ -90,7 +94,41 @@ class DeviceService
             $updateData['operator'] = $operator;
         }
 
+        if (!is_null($simStatus)) {
+            $updateData['sim_status'] = $simStatus;
+        }
+
+        if (!is_null($regStatus)) {
+            $updateData['reg_status'] = $regStatus;
+        }
+
         $device->update($updateData);
+
+        return $device->fresh();
+    }
+
+    /**
+     * Queue an AT Command for ESP32 to execute on next heartbeat/poll.
+     */
+    public function queueCommand(Device $device, string $command): Device
+    {
+        $device->update([
+            'pending_command' => trim($command),
+        ]);
+
+        return $device->fresh();
+    }
+
+    /**
+     * Save AT Command execution response received from ESP32.
+     */
+    public function saveCommandResponse(Device $device, string $command, string $response): Device
+    {
+        $device->update([
+            'pending_command' => null, // Clear pending command
+            'command_response' => "[AT Command Sent]: " . $command . "\n\n[SIM800L Response]:\n" . $response,
+            'command_updated_at' => now(),
+        ]);
 
         return $device->fresh();
     }
@@ -102,7 +140,6 @@ class DeviceService
     {
         $allDevices = Device::all();
 
-        // Mark devices as offline if last_seen > 5 minutes ago
         $onlineCount = $allDevices->filter(function ($device) {
             return $device->is_online;
         })->count();

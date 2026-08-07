@@ -316,3 +316,45 @@ String GSMManager::getOperator() {
     }
     return "UNKNOWN";
 }
+
+String GSMManager::getSIMStatus() {
+    String resp = sendCommand("AT+CPIN?", 1500);
+    int idx = resp.indexOf("+CPIN:");
+    if (idx != -1) {
+        String sub = resp.substring(idx + 6);
+        sub.trim();
+        int okIdx = sub.indexOf("\r");
+        if (okIdx != -1) {
+            sub = sub.substring(0, okIdx);
+        }
+        sub.trim();
+        return sub;
+    }
+    return "UNKNOWN";
+}
+
+String GSMManager::getRegistrationStatus() {
+    String resp = sendCommand("AT+CREG?", 1500);
+    int idx = resp.indexOf("+CREG:");
+    if (idx != -1) {
+        String sub = resp.substring(idx + 6);
+        int commaIdx = sub.indexOf(",");
+        if (commaIdx != -1) {
+            int stat = sub.substring(commaIdx + 1, commaIdx + 2).toInt();
+            switch (stat) {
+                case 1: return "Registered Home";
+                case 2: return "Searching";
+                case 3: return "Registration Denied";
+                case 4: return "Unknown";
+                case 5: return "Registered Roaming";
+                default: return "Not Registered";
+            }
+        }
+    }
+    return "UNKNOWN";
+}
+
+String GSMManager::executeCustomAT(String command, uint32_t timeout) {
+    command.trim();
+    return sendCommand(command, timeout);
+}

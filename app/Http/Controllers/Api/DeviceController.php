@@ -37,7 +37,6 @@ class DeviceController extends Controller
         /** @var Device|null $device */
         $device = $request->attributes->get('authenticated_device');
 
-        // Fallback search if middleware isn't attached (e.g. token passed directly in request body)
         if (!$device && $request->filled('token')) {
             $device = Device::where('token', $request->input('token'))->first();
         }
@@ -52,13 +51,54 @@ class DeviceController extends Controller
         $updatedDevice = $this->deviceService->handleHeartbeat(
             $device,
             $request->validated('signal'),
-            $request->validated('operator')
+            $request->validated('operator'),
+            $request->validated('sim_status'),
+            $request->validated('reg_status')
         );
 
-        return response()->json([
+        $responsePayload = [
             'success' => true,
             'message' => 'Heartbeat received successfully.',
             'data' => new DeviceResource($updatedDevice),
+        ];
+
+        // If an AT Command is pending, pass it to ESP32 in heartbeat response
+        if (!empty($updatedDevice->pending_command)) {
+            $responsePayload['pending_command'] = $updatedDevice->pending_command;
+        }
+
+        return response()->json($responsePayload, Response::HTTP_OK);
+    }
+
+    /**
+     * Store response of executed AT command from ESP32.
+     * POST /api/device/command-response
+     */
+    public function commandResponse(Request $request): JsonResponse
+    {
+        /** @var Device|null $device */
+        $device = $request->attributes->get('authenticated_device');
+
+        if (!$device && $request->filled('token')) {
+            $device = Device::where('token', $request->input('token'))->first();
+        }
+
+        if (!$device) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized device token.',
+            ], Response::HTTP_UNAUTHORIZED);
+        }
+
+        $command = (string) $request->input('command', '');
+        $commandResult = (string) $request->input('response', '');
+
+        $updated = $this->deviceService->saveCommandResponse($device, $command, $commandResult);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Command response recorded.',
+            'data' => new DeviceResource($updated),
         ], Response::HTTP_OK);
     }
 }
