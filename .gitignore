@@ -12,7 +12,6 @@
 /.vscode
 /.zed
 /auth.json
-/include/config.h
 /node_modules
 /public/build
 /public/hot
@@ -24,3 +23,5 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 .pio/
+include/config.h
+!include/config.h.example
