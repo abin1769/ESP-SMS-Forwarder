@@ -129,14 +129,29 @@ void GSMManager::update() {
             break;
     }
 
-    // --- Stream Incoming SMS Detector (+CMTI: "SM",3) ---
+    // --- Stream Incoming Unsolicited Data & SMS Detector ---
     while (_serial->available()) {
         String line = _serial->readStringUntil('\n');
         line.trim();
 
-        int cmtiIdx = line.indexOf("+CMTI:");
-        if (cmtiIdx != -1) {
-            int commaIdx = line.indexOf(",", cmtiIdx);
+        // 1. Detect SIM800L Power Drop / Hardware Restart (RDY)
+        if (line.indexOf("RDY") != -1) {
+            Serial.println("[GSM Warning]\nSIM800L Power Drop / Hardware Restart Detected! (RDY)");
+            _state = GSM_STATE_CHECK_AT; // Trigger automatic re-initialization
+            _lastStateTimer = currentMillis;
+        }
+        // 2. Detect Power Voltage Dip Alarm
+        else if (line.indexOf("UNDER-VOLTAGE") != -1) {
+            Serial.println("[GSM Alarm]\nCRITICAL: SIM800L Power Supply Drop Detected! (UNDER-VOLTAGE)");
+        }
+        // 3. Detect Normal Power Down
+        else if (line.indexOf("POWER DOWN") != -1) {
+            Serial.println("[GSM Alarm]\nCRITICAL: SIM800L Power Shutdown! (POWER DOWN)");
+            _state = GSM_STATE_CHECK_AT;
+        }
+        // 4. Detect SMS notification: +CMTI: "SM",3
+        else if (line.indexOf("+CMTI:") != -1) {
+            int commaIdx = line.indexOf(",", line.indexOf("+CMTI:"));
             if (commaIdx != -1) {
                 int smsIndex = line.substring(commaIdx + 1).toInt();
                 Serial.println("[GSM]\nSMS detected");
@@ -145,7 +160,7 @@ void GSMManager::update() {
         }
     }
 
-    // Read queued SMS indexes
+    // Process queued SMS indexes into SMSMessage objects
     if (!_pendingSMSIndexes.empty() && _state == GSM_STATE_READY) {
         int targetIdx = _pendingSMSIndexes.front();
         _pendingSMSIndexes.pop();
