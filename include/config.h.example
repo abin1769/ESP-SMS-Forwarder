@@ -23,6 +23,6 @@
 // ============================================================================
 // Timing Constants (in milliseconds)
 // ============================================================================
-#define HEARTBEAT_INTERVAL 30000 // Send heartbeat every 30 seconds
+#define HEARTBEAT_INTERVAL 10000 // Send heartbeat every 10 seconds for fast remote AT execution
 
 #endif // CONFIG_H

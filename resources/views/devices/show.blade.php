@@ -107,7 +107,7 @@
     <div class="card-header bg-dark text-white border-0 pt-4 px-4 pb-2 d-flex justify-content-between align-items-center">
         <h6 class="fw-bold m-0 font-monospace text-success"><i class="bi bi-terminal-fill me-2"></i>Interactive SIM800L AT Console</h6>
         <div class="d-flex align-items-center gap-2">
-            <span class="badge bg-secondary font-monospace" id="console_status">Ready</span>
+            <span class="badge bg-secondary font-monospace" id="consoleStatus">Ready</span>
             <button type="button" class="btn btn-sm btn-outline-light" id="btn-refresh-status" title="Refresh Output">
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
@@ -145,12 +145,12 @@
         <!-- Response Console Screen -->
         <div class="mb-2 d-flex justify-content-between align-items-center">
             <span class="small text-muted font-monospace">CONSOLE OUTPUT HISTORY:</span>
-            <small class="text-muted font-monospace" id="response_time">
+            <small class="text-muted font-monospace" id="responseTime">
                 {{ $device->command_updated_at ? 'Updated: ' . $device->command_updated_at->format('H:i:s') : '' }}
             </small>
         </div>
         <div class="p-3 rounded-3 font-monospace border border-secondary" style="background-color: #0d1117; min-height: 220px; max-height: 400px; overflow-y: auto;" id="consoleOutput">
-            <pre class="m-0 text-success" id="consoleOutputText" style="white-space: pre-wrap;">{{ $device->command_response ?? "// Belum ada AT command yang dikirim ke modul SIM800L.\n// Ketik perintah AT di atas lalu klik Send AT." }}</pre>
+            <pre class="m-0 text-success" id="consoleOutputText" style="white-space: pre-wrap;">{{ $device->command_response ?? "// Belum ada output AT Command dari modul SIM800L.\n// Ketik perintah AT di atas lalu klik Send AT." }}</pre>
         </div>
     </div>
 </div>
@@ -168,11 +168,16 @@
         const responseTime = document.getElementById("responseTime");
         let pollingInterval = null;
 
-        // Preset button click
+        // Preset button click listener
         document.querySelectorAll(".btn-preset-at").forEach(btn => {
-            btn.addEventListener("click", function() {
+            btn.addEventListener("click", function(e) {
+                e.preventDefault();
                 cmdInput.value = this.getAttribute("data-cmd");
-                atForm.dispatchEvent(new Event('submit'));
+                if (typeof atForm.requestSubmit === 'function') {
+                    atForm.requestSubmit();
+                } else {
+                    atForm.dispatchEvent(new Event('submit', { cancelable: true }));
+                }
             });
         });
 
@@ -197,19 +202,22 @@
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    consoleStatus.textContent = "Waiting ESP32 execution...";
+                    consoleStatus.textContent = "Queued on Backend";
                     consoleStatus.className = "badge bg-info font-monospace";
-                    consoleOutputText.textContent = `[System]: Perintah '${command}' telah masuk antrean. Menunggu ESP32 mengeksekusi...`;
+                    consoleOutputText.textContent = `[System]: Perintah '${command}' berhasil dikirim ke backend Laravel.\n[System]: Menunggu ESP32 mengeksekusi pada Heartbeat berikutnya...\n\n` + consoleOutputText.textContent;
                     startPollingStatus();
+                } else {
+                    consoleStatus.textContent = "Error";
+                    consoleStatus.className = "badge bg-danger font-monospace";
                 }
             })
             .catch(err => {
-                consoleStatus.textContent = "Error";
+                consoleStatus.textContent = "Error Sending";
                 consoleStatus.className = "badge bg-danger font-monospace";
             });
         });
 
-        // Refresh Status
+        // Refresh Status via AJAX
         function fetchStatus() {
             fetch(`/devices/${deviceId}/command-status`)
                 .then(res => res.json())
@@ -227,8 +235,12 @@
                         consoleOutputText.textContent = data.command_response;
                     }
 
+                    if (data.command_updated_at) {
+                        responseTime.textContent = `Updated: ${data.command_updated_at}`;
+                    }
+
                     if (data.pending_command) {
-                        consoleStatus.textContent = "Pending execution on ESP32...";
+                        consoleStatus.textContent = `Queued: ${data.pending_command}`;
                         consoleStatus.className = "badge bg-warning font-monospace";
                     } else {
                         consoleStatus.textContent = "Ready";
@@ -238,7 +250,8 @@
                             pollingInterval = null;
                         }
                     }
-                });
+                })
+                .catch(err => console.error(err));
         }
 
         document.getElementById("btn-refresh-status").addEventListener("click", fetchStatus);
