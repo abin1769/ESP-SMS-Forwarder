@@ -1,0 +1,34 @@
+$kind: http-request
+name: 'Heartbeat - Invalid Token'
+method: POST
+url: '{{base_url}}/api/device/heartbeat'
+order: 4000
+headers:
+  - key: X-Device-Token
+    value: invalid_token_xyz
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "signal": 18,
+      "operator": "Telkomsel"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 401", function () {
+        pm.response.to.have.status(401);
+      });
+
+      pm.test("success is false", function () {
+        const json = pm.response.json();
+        pm.expect(json.success).to.be.false;
+      });
+
+      pm.test("message contains 'Invalid device token'", function () {
+        const json = pm.response.json();
+        pm.expect(json.message).to.include("Invalid device token");
+      });

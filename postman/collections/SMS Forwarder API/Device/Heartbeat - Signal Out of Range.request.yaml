@@ -1,0 +1,37 @@
+$kind: http-request
+name: 'Heartbeat - Signal Out of Range'
+method: POST
+url: '{{base_url}}/api/device/heartbeat'
+order: 5000
+headers:
+  - key: X-Device-Token
+    value: '{{device_token}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "signal": 99,
+      "operator": "Telkomsel"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 422", function () {
+        pm.response.to.have.status(422);
+      });
+
+      pm.test("Response contains validation error for signal", function () {
+        const json = pm.response.json();
+        pm.expect(json).to.have.property("errors");
+        pm.expect(json.errors).to.have.property("signal");
+      });
+
+      pm.test("Error message mentions 'between 0 and 31'", function () {
+        const json = pm.response.json();
+        const signalErrors = json.errors.signal;
+        const errorText = Array.isArray(signalErrors) ? signalErrors.join(" ") : signalErrors;
+        pm.expect(errorText).to.include("between 0 and 31");
+      });

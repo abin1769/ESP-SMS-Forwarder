@@ -1,0 +1,8 @@
+$kind: collection
+name: SMS Forwarder API
+description: REST API collection for the ESP32 + SIM800L SMS Gateway. Tests device heartbeat and SMS forwarding endpoints.
+variables:
+  - key: base_url
+    value: 'http://localhost:8000'
+  - key: device_token
+    value: ''

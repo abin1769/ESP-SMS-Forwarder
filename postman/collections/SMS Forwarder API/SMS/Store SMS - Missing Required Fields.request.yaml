@@ -1,0 +1,30 @@
+$kind: http-request
+name: 'Store SMS - Missing Required Fields'
+method: POST
+url: '{{base_url}}/api/sms'
+order: 4000
+headers:
+  - key: X-Device-Token
+    value: '{{device_token}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "processed": false
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 422", function () {
+        pm.response.to.have.status(422);
+      });
+
+      pm.test("Response contains validation errors for phone and message", function () {
+        const json = pm.response.json();
+        pm.expect(json).to.have.property("errors");
+        pm.expect(json.errors).to.have.property("phone");
+        pm.expect(json.errors).to.have.property("message");
+      });

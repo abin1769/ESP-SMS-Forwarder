@@ -1,0 +1,38 @@
+$kind: http-request
+name: 'Store SMS - Invalid Date Format'
+method: POST
+url: '{{base_url}}/api/sms'
+order: 6000
+headers:
+  - key: X-Device-Token
+    value: '{{device_token}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "phone": "+628123456789",
+      "message": "Test SMS",
+      "received_at": "07/08/2026"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 422", function () {
+        pm.response.to.have.status(422);
+      });
+
+      pm.test("Response contains validation error for received_at", function () {
+        const json = pm.response.json();
+        pm.expect(json).to.have.property("errors");
+        pm.expect(json.errors).to.have.property("received_at");
+      });
+
+      pm.test("Error message mentions 'Y-m-d H:i:s'", function () {
+        const json = pm.response.json();
+        const receivedAtErrors = json.errors.received_at;
+        const errorText = Array.isArray(receivedAtErrors) ? receivedAtErrors.join(" ") : receivedAtErrors;
+        pm.expect(errorText).to.include("Y-m-d H:i:s");
+      });

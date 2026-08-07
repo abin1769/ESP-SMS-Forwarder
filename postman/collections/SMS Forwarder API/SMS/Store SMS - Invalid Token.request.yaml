@@ -1,0 +1,29 @@
+$kind: http-request
+name: 'Store SMS - Invalid Token'
+method: POST
+url: '{{base_url}}/api/sms'
+order: 5000
+headers:
+  - key: X-Device-Token
+    value: totally_wrong_token
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "phone": "+628123456789",
+      "message": "Test SMS"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 401", function () {
+        pm.response.to.have.status(401);
+      });
+
+      pm.test("success is false", function () {
+        const json = pm.response.json();
+        pm.expect(json.success).to.be.false;
+      });

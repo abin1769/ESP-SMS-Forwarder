@@ -1,0 +1,51 @@
+$kind: http-request
+name: 'Store SMS - Valid'
+method: POST
+url: '{{base_url}}/api/sms'
+order: 3000
+headers:
+  - key: X-Device-Token
+    value: '{{device_token}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "phone": "+628123456789",
+      "message": "Test SMS from Postman",
+      "received_at": "2026-08-07 10:00:00",
+      "processed": false
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 201", function () {
+        pm.response.to.have.status(201);
+      });
+
+      pm.test("success is true", function () {
+        const json = pm.response.json();
+        pm.expect(json.success).to.be.true;
+      });
+
+      pm.test("message equals 'SMS saved successfully.'", function () {
+        const json = pm.response.json();
+        pm.expect(json.message).to.equal("SMS saved successfully.");
+      });
+
+      pm.test("data.phone equals '+628123456789'", function () {
+        const json = pm.response.json();
+        pm.expect(json.data.phone).to.equal("+628123456789");
+      });
+
+      pm.test("data.message equals 'Test SMS from Postman'", function () {
+        const json = pm.response.json();
+        pm.expect(json.data.message).to.equal("Test SMS from Postman");
+      });
+
+      pm.test("data.device exists (relationship loaded)", function () {
+        const json = pm.response.json();
+        pm.expect(json.data).to.have.property("device");
+      });

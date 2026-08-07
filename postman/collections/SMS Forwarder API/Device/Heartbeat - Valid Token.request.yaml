@@ -1,0 +1,39 @@
+$kind: http-request
+name: 'Heartbeat - Valid Token'
+method: POST
+url: '{{base_url}}/api/device/heartbeat'
+order: 2000
+headers:
+  - key: X-Device-Token
+    value: '{{device_token}}'
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "signal": 18,
+      "operator": "Telkomsel"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 200", function () {
+        pm.response.to.have.status(200);
+      });
+
+      pm.test("success is true", function () {
+        const json = pm.response.json();
+        pm.expect(json.success).to.be.true;
+      });
+
+      pm.test("message equals 'Heartbeat received successfully.'", function () {
+        const json = pm.response.json();
+        pm.expect(json.message).to.equal("Heartbeat received successfully.");
+      });
+
+      pm.test("data.status exists", function () {
+        const json = pm.response.json();
+        pm.expect(json.data).to.have.property("status");
+      });

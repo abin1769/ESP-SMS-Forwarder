@@ -1,0 +1,32 @@
+$kind: http-request
+name: 'Heartbeat - Missing Token'
+method: POST
+url: '{{base_url}}/api/device/heartbeat'
+order: 3000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "signal": 18,
+      "operator": "Telkomsel"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 401", function () {
+        pm.response.to.have.status(401);
+      });
+
+      pm.test("success is false", function () {
+        const json = pm.response.json();
+        pm.expect(json.success).to.be.false;
+      });
+
+      pm.test("message contains 'token missing'", function () {
+        const json = pm.response.json();
+        pm.expect(json.message).to.include("token missing");
+      });
