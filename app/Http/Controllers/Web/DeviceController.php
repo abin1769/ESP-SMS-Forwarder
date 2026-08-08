@@ -108,6 +108,26 @@ class DeviceController extends Controller
     }
 
     /**
+     * Trigger pull / sync of all SMS stored on SIM card memory for device.
+     */
+    public function syncSimSms(Request $request, Device $device): JsonResponse|RedirectResponse
+    {
+        $this->deviceService->queueCommand($device, 'SYNC_SIM_SMS');
+
+        $message = "Perintah penarikan SMS dari kartu SIM (SYNC_SIM_SMS) telah dikirimkan ke {$device->name}. ESP32 akan membaca semua pesan di memori SIM dan menyimpannya ke database.";
+
+        if ($request->expectsJson() || $request->ajax() || $request->wantsJson() || $request->header('Accept') === 'application/json') {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'pending_command' => 'SYNC_SIM_SMS',
+            ]);
+        }
+
+        return redirect()->back()->with('success', $message);
+    }
+
+    /**
      * Get real-time command response and status via AJAX.
      */
     public function getCommandStatus(Device $device): JsonResponse
@@ -126,3 +146,4 @@ class DeviceController extends Controller
         ]);
     }
 }
+

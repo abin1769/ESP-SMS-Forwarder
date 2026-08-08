@@ -46,6 +46,8 @@ class DeviceApiTest extends TestCase
             'token' => 'VALID_TEST_TOKEN_123',
             'signal' => 28,
             'operator' => 'INDOSAT',
+            'sim_status' => 'READY',
+            'reg_status' => 'Registered Home (+CREG: 0,1)',
         ]);
 
         $response->assertStatus(200)
@@ -56,6 +58,8 @@ class DeviceApiTest extends TestCase
                     'status' => 'online',
                     'signal' => 28,
                     'operator' => 'INDOSAT',
+                    'sim_status' => 'READY',
+                    'reg_status' => 'Registered Home (+CREG: 0,1)',
                 ]
             ]);
 
@@ -64,6 +68,42 @@ class DeviceApiTest extends TestCase
             'status' => 'online',
             'signal' => 28,
             'operator' => 'INDOSAT',
+            'sim_status' => 'READY',
+            'reg_status' => 'Registered Home (+CREG: 0,1)',
+        ]);
+    }
+
+    public function test_can_queue_sync_sim_sms_command_for_device(): void
+    {
+        $device = Device::factory()->create();
+
+        $response = $this->postJson("/devices/{$device->id}/sync-sms");
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'pending_command' => 'SYNC_SIM_SMS',
+            ]);
+
+        $this->assertDatabaseHas('devices', [
+            'id' => $device->id,
+            'pending_command' => 'SYNC_SIM_SMS',
+        ]);
+    }
+
+    public function test_can_queue_sync_sim_sms_from_sms_page(): void
+    {
+        $device = Device::factory()->create();
+
+        $response = $this->post('/sms/sync-sim', [
+            'device_id' => $device->id,
+        ]);
+
+        $response->assertRedirect();
+        $this->assertDatabaseHas('devices', [
+            'id' => $device->id,
+            'pending_command' => 'SYNC_SIM_SMS',
         ]);
     }
 }
+

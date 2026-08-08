@@ -7,17 +7,23 @@ Sistem Backend SMS Gateway berbasis **Laravel 12 (PHP 8.3)** & **Bootstrap 5** y
 ## 📌 Fitur Utama
 
 1. **Device Authentication**: Keamanan API berbasis **Device Token** (HTTP Header `X-Device-Token` / Bearer / JSON Body).
-2. **REST API Gateway**: Endpoint standar untuk Heartbeat status perangkat (`POST /api/device/heartbeat`) dan Pengiriman SMS Masuk (`POST /api/sms`).
+2. **REST API Gateway**: Endpoint standar untuk Heartbeat status perangkat (`POST /api/device/heartbeat`), Respon AT Command (`POST /api/device/command-response`), dan Pengiriman SMS Masuk (`POST /api/sms`).
 3. **Clean Service Architecture**: Pemisahan logika bisnis dari Controller menggunakan **Service Layer** (`DeviceService`, `SmsService`).
 4. **Form Request Validation**: Validasi request ketat untuk API & Web.
-5. **Interactive Dashboard**:
-   - Status Device Realtime (Online/Offline)
-   - Kuat Sinyal SIM800L (CSQ 0-31) & Info Operator
+5. **Pemantauan Status SIM Card & Jaringan Realtime**:
+   - Status Kartu SIM: `READY` (Terpasang & Siap) / `UNKNOWN` / `SIM PIN`
+   - Registrasi Sinyal Jaringan Seluler (`AT+CREG?`): Deteksi otomatis saat terhubung ke provider `+CREG: 0,1` (Registered Home) / `+CREG: 0,5` (Registered Roaming) / `+CREG: 0,2` (Searching)
+   - Kuat Sinyal SIM800L (CSQ 0-31, estimasi dBm & Kualitas Sinyal: Sangat Baik / Baik / Cukup / Lemah)
+   - Operator Seluler (AT+COPS?)
    - Last Seen Activity Tracker
-   - Statistik Total SMS & SMS Hari Ini
-   - Grafik Tren SMS 7 Hari Terakhir (Chart.js)
-6. **Manajemen Data SMS**: Table SMS dengan fitur pencarian live, filter per device, filter status diproses, dan pagination Bootstrap 5.
-7. **CRUD Devices**: Manajemen perangkat ESP32, penambahan device, update status, hapus, dan tombol **Regenerate Token**.
+6. **Penarikan Pesan dari Memori SIM (SIM Storage Pull / Sync)**:
+   - Tombol **"Tarik Pesan dari SIM"** pada Web Dashboard & Device Console
+   - Fitur otomatis penarikan seluruh SMS tersimpan di memori SIM (`AT+CMGL="ALL"`) saat modul pertama kali terhubung ke jaringan (`+CREG: 0,1`) maupun melalui trigger jarak jauh dari Web
+7. **Interactive GSM Live Console & AT Terminal**:
+   - Eksekusi AT Command secara remote dari Web ke ESP32 + SIM800L
+   - Preset AT Command instan: `SYNC_SIM_SMS`, `AT+CMGL="ALL"`, `AT+CPMS?`, `AT+CREG?`, `AT+CSQ`, `AT+CPIN?`, `AT+COPS?`, `AT+CBC`
+8. **Manajemen Data SMS**: Table SMS dengan fitur pencarian live, filter per device, filter status diproses, dan pagination Bootstrap 5.
+9. **CRUD Devices**: Manajemen perangkat ESP32, penambahan device, update status, hapus, dan tombol **Regenerate Token**.
 
 ---
 
@@ -28,15 +34,15 @@ app/
 ├── Http/
 │   ├── Controllers/
 │   │   ├── Api/
-│   │   │   ├── DeviceController.php     # Endpoint GET /api/device & POST /api/device/heartbeat
+│   │   │   ├── DeviceController.php     # Endpoint GET /api/device, POST /api/device/heartbeat & /api/device/command-response
 │   │   │   └── SmsController.php        # Endpoint GET /api/sms & POST /api/sms
 │   │   └── Web/
 │   │       ├── DashboardController.php  # Controller halaman utama Dashboard
-│   │       ├── DeviceController.php     # CRUD Perangkat ESP32
-│   │       └── SmsController.php        # List, Detail, Toggle & Delete SMS
+│   │       ├── DeviceController.php     # CRUD Perangkat ESP32, syncSimSms & Live AT Console
+│   │       └── SmsController.php        # List, Detail, Toggle, Delete SMS & syncFromSim
 │   ├── Middleware/
 │   │   └── EnsureValidDeviceToken.php   # Otorisasi token device pada API
-│    me Requests/
+│   ├── Requests/
 │   │   ├── Api/
 │   │   │   ├── DeviceHeartbeatRequest.php
 │   │   │   └── StoreSmsRequest.php
@@ -50,8 +56,18 @@ app/
 │   ├── Device.php                       # Model Device & Relasi
 │   └── Sms.php                          # Model SMS, Scope Search & Filter
 └── Services/
-    ├── DeviceService.php                # Service Logic Device
+    ├── DeviceService.php                # Service Logic Device, Heartbeat & AT Queue
     └── SmsService.php                   # Service Logic SMS & Statistics
+
+src/
+└── main.cpp                             # Firmware ESP32-S3: State Machine, SMS Detection, SIM SMS Sync & AT Console
+
+lib/
+├── GSMManager/                          # Driver SIM800L: Registrasi Jaringan (+CREG), Status SIM (+CPIN), Sinyal (CSQ), Sync SIM (CMGL)
+├── ApiClient/                           # HTTP Client ESP32 untuk REST API Laravel
+└── WifiManagerCustom/                   # Pengelola koneksi & auto-reconnect WiFi
+```
+
 
 database/
 ├── factories/

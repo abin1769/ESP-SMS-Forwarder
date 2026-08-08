@@ -10,7 +10,7 @@
 
     <!-- Total Devices -->
     <div class="col-12 col-sm-6 col-xl-3">
-        <div class="stat-card p-3">
+        <div class="stat-card p-3 h-100">
             <div class="d-flex align-items-center justify-content-between">
                 <div>
                     <span class="text-muted small fw-semibold">TOTAL GATEWAYS</span>
@@ -29,7 +29,7 @@
 
     <!-- Total SMS -->
     <div class="col-12 col-sm-6 col-xl-3">
-        <div class="stat-card p-3">
+        <div class="stat-card p-3 h-100">
             <div class="d-flex align-items-center justify-content-between">
                 <div>
                     <span class="text-muted small fw-semibold">TOTAL SMS TERTERIMA</span>
@@ -47,7 +47,7 @@
 
     <!-- SMS Hari Ini -->
     <div class="col-12 col-sm-6 col-xl-3">
-        <div class="stat-card p-3">
+        <div class="stat-card p-3 h-100">
             <div class="d-flex align-items-center justify-content-between">
                 <div>
                     <span class="text-muted small fw-semibold">SMS HARI INI</span>
@@ -65,7 +65,7 @@
 
     <!-- Active Operators -->
     <div class="col-12 col-sm-6 col-xl-3">
-        <div class="stat-card p-3">
+        <div class="stat-card p-3 h-100">
             <div class="d-flex align-items-center justify-content-between">
                 <div>
                     <span class="text-muted small fw-semibold">OPERATOR AKTIF</span>
@@ -97,33 +97,92 @@
         <div class="card border-0 shadow-sm rounded-4 h-100">
             <div class="card-header bg-white border-0 pt-4 px-4 pb-0 d-flex justify-content-between align-items-center">
                 <h6 class="fw-bold m-0"><i class="bi bi-activity text-primary me-2"></i>Status Perangkat ESP32</h6>
-                <a href="{{ route('devices.index') }}" class="btn btn-sm btn-light">Kelola Devices</a>
+                <div class="d-flex align-items-center gap-2">
+                    <form action="{{ route('sms.sync-sim') }}" method="POST" class="d-inline">
+                        @csrf
+                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Tarik semua pesan dari SIM">
+                            <i class="bi bi-cloud-arrow-down-fill me-1"></i> Tarik SMS
+                        </button>
+                    </form>
+                    <a href="{{ route('devices.index') }}" class="btn btn-sm btn-light">Kelola</a>
+                </div>
             </div>
             <div class="card-body p-4">
                 @forelse($devices as $device)
-                    <div class="d-flex align-items-center justify-content-between p-3 mb-3 bg-light rounded-3 border">
-                        <div class="d-flex align-items-center gap-3">
-                            <div class="stat-icon {{ $device->is_online ? 'bg-success-subtle text-success' : 'bg-secondary-subtle text-secondary' }}">
-                                <i class="bi bi-cpu"></i>
+                    <div class="p-3 mb-3 bg-light rounded-3 border">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="stat-icon {{ $device->is_online ? 'bg-success-subtle text-success' : 'bg-secondary-subtle text-secondary' }}">
+                                    <i class="bi bi-cpu"></i>
+                                </div>
+                                <div>
+                                    <h6 class="fw-bold mb-1">
+                                        <a href="{{ route('devices.show', $device) }}" class="text-decoration-none text-dark">
+                                            {{ $device->name }}
+                                        </a>
+                                    </h6>
+                                    <div class="small text-muted d-flex align-items-center gap-2">
+                                        <span><i class="bi bi-sim me-1"></i>{{ $device->operator ?? 'No SIM' }}</span>
+                                        <span>•</span>
+                                        <span><i class="bi bi-reception-4 me-1 text-warning"></i>Signal: {{ $device->signal ?? 0 }}/31</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div>
-                                <h6 class="fw-bold mb-1">{{ $device->name }}</h6>
-                                <div class="small text-muted d-flex align-items-center gap-2">
-                                    <span><i class="bi bi-sim me-1"></i>{{ $device->operator ?? 'No SIM' }}</span>
-                                    <span>•</span>
-                                    <span><i class="bi bi-reception-4 me-1 text-warning"></i>Signal: {{ $device->signal ?? 0 }}/31</span>
+                            <div class="text-end">
+                                @if($device->is_online)
+                                    <span class="badge badge-online px-2 py-1 mb-1">ONLINE</span>
+                                @else
+                                    <span class="badge badge-offline px-2 py-1 mb-1">OFFLINE</span>
+                                @endif
+                                <div class="small text-muted" style="font-size: 0.75rem;">
+                                    {{ $device->last_seen ? $device->last_seen->diffForHumans() : 'Belum Pernah' }}
                                 </div>
                             </div>
                         </div>
-                        <div class="text-end">
-                            @if($device->is_online)
-                                <span class="badge badge-online px-2 py-1 mb-1">ONLINE</span>
-                            @else
-                                <span class="badge badge-offline px-2 py-1 mb-1">OFFLINE</span>
-                            @endif
-                            <div class="small text-muted" style="font-size: 0.75rem;">
-                                {{ $device->last_seen ? $device->last_seen->diffForHumans() : 'Belum Pernah' }}
+
+                        <!-- SIM & CREG Diagnostics Bar -->
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 pt-2 border-top">
+                            <div class="d-flex flex-wrap gap-1">
+                                <!-- SIM Badge -->
+                                @if(($device->sim_status ?? 'READY') === 'READY')
+                                    <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1" style="font-size: 0.72rem;">
+                                        <i class="bi bi-sim-fill me-1"></i>SIM READY
+                                    </span>
+                                @else
+                                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1" style="font-size: 0.72rem;">
+                                        <i class="bi bi-sim me-1"></i>{{ $device->sim_status ?? 'UNKNOWN' }}
+                                    </span>
+                                @endif
+
+                                <!-- CREG Badge -->
+                                @php
+                                    $reg = $device->reg_status ?? 'Registered Home';
+                                @endphp
+                                @if(str_contains($reg, 'Home') || str_contains($reg, '0,1'))
+                                    <span class="badge bg-success text-white px-2 py-1" style="font-size: 0.72rem;">
+                                        <i class="bi bi-broadcast-pin me-1"></i>+CREG: 0,1
+                                    </span>
+                                @elseif(str_contains($reg, 'Roaming') || str_contains($reg, '0,5'))
+                                    <span class="badge bg-info text-white px-2 py-1" style="font-size: 0.72rem;">
+                                        <i class="bi bi-globe me-1"></i>+CREG: 0,5
+                                    </span>
+                                @elseif(str_contains($reg, 'Searching') || str_contains($reg, '0,2'))
+                                    <span class="badge bg-warning text-dark px-2 py-1" style="font-size: 0.72rem;">
+                                        <i class="bi bi-arrow-repeat me-1"></i>Mencari Sinyal...
+                                    </span>
+                                @else
+                                    <span class="badge bg-secondary text-white px-2 py-1" style="font-size: 0.72rem;">
+                                        {{ $reg }}
+                                    </span>
+                                @endif
                             </div>
+
+                            <form action="{{ route('devices.sync-sms', $device) }}" method="POST" class="d-inline">
+                                @csrf
+                                <button type="submit" class="btn btn-sm btn-light border text-primary" style="font-size: 0.75rem;" title="Tarik SMS dari SIM Device Ini">
+                                    <i class="bi bi-cloud-arrow-down-fill me-1"></i> Tarik SIM
+                                </button>
+                            </form>
                         </div>
                     </div>
                 @empty
@@ -143,7 +202,7 @@
     <div class="col-12 col-lg-7">
         <div class="card border-0 shadow-sm rounded-4 h-100">
             <div class="card-header bg-white border-0 pt-4 px-4 pb-0">
-                <h6 class="fw-bold m-0"><i class="bi bi-graph-up text-primary me-2"></i>Grafik SMS Terkerim (7 Hari Terakhir)</h6>
+                <h6 class="fw-bold m-0"><i class="bi bi-graph-up text-primary me-2"></i>Grafik SMS Terkirim (7 Hari Terakhir)</h6>
             </div>
             <div class="card-body p-4">
                 <canvas id="smsChart" height="230"></canvas>
@@ -258,3 +317,4 @@
     });
 </script>
 @endpush
+

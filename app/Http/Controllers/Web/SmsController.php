@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Models\Device;
 use App\Models\Sms;
 use App\Services\DeviceService;
 use App\Services\SmsService;
@@ -56,6 +57,33 @@ class SmsController extends Controller
     }
 
     /**
+     * Trigger sync/pull of SMS stored in SIM card memory from all or specified device.
+     */
+    public function syncFromSim(Request $request): RedirectResponse
+    {
+        $deviceId = $request->input('device_id');
+        $devices = $deviceId 
+            ? Device::where('id', $deviceId)->get() 
+            : Device::all();
+
+        if ($devices->isEmpty()) {
+            return redirect()->back()->with('error', 'Tidak ada perangkat ESP32 yang terdaftar untuk menarik SMS dari SIM.');
+        }
+
+        $names = [];
+        foreach ($devices as $dev) {
+            $this->deviceService->queueCommand($dev, 'SYNC_SIM_SMS');
+            $names[] = $dev->name;
+        }
+
+        $namesList = implode(', ', $names);
+        return redirect()->back()->with(
+            'success',
+            "Perintah penarikan SMS dari memori kartu SIM berhasil dikirim ke perangkat: {$namesList}. ESP32 akan membaca semua pesan di SIM dan menyimpannya ke database."
+        );
+    }
+
+    /**
      * Toggle SMS processed status.
      */
     public function toggleProcessed(Sms $sm): RedirectResponse
@@ -67,3 +95,4 @@ class SmsController extends Controller
             ->with('success', "SMS #{$sm->id} {$statusText}.");
     }
 }
+

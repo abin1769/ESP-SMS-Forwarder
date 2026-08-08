@@ -5,13 +5,21 @@
 
 @section('content')
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <div>
-        <p class="text-muted mb-0">Daftar perangkat ESP32 Gateway yang diotorisasi untuk mengirimkan SMS ke sistem.</p>
+        <p class="text-muted mb-0">Daftar perangkat ESP32 Gateway yang diotorisasi untuk mengirimkan dan menarik SMS ke sistem.</p>
     </div>
-    <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#addDeviceModal">
-        <i class="bi bi-plus-lg me-1"></i> Tambah Device Baru
-    </button>
+    <div class="d-flex align-items-center gap-2">
+        <form action="{{ route('sms.sync-sim') }}" method="POST" class="d-inline">
+            @csrf
+            <button type="submit" class="btn btn-outline-primary shadow-sm" title="Tarik semua SMS dari SIM di semua ESP32 yang terhubung">
+                <i class="bi bi-cloud-arrow-down-fill me-1"></i> Tarik SMS dari Semua SIM
+            </button>
+        </form>
+        <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#addDeviceModal">
+            <i class="bi bi-plus-lg me-1"></i> Tambah Device Baru
+        </button>
+    </div>
 </div>
 
 <!-- Devices Table Card -->
@@ -41,11 +49,12 @@
                         <th style="width: 50px;">ID</th>
                         <th>Nama Device</th>
                         <th>Token Autentikasi</th>
-                        <th>Status</th>
+                        <th>Status Online</th>
+                        <th>Status SIM & CREG</th>
                         <th>Sinyal (CSQ)</th>
                         <th>Operator</th>
                         <th>Terakhir Terlihat</th>
-                        <th style="width: 160px;" class="text-end">Aksi</th>
+                        <th style="width: 180px;" class="text-end">Aksi</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -72,9 +81,48 @@
                                 @endif
                             </td>
                             <td>
+                                <div class="d-flex flex-column gap-1">
+                                    <!-- SIM Status -->
+                                    <div>
+                                        @if(($device->sim_status ?? 'READY') === 'READY')
+                                            <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1" style="font-size: 0.75rem;">
+                                                <i class="bi bi-sim-fill me-1"></i>SIM READY
+                                            </span>
+                                        @else
+                                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1" style="font-size: 0.75rem;">
+                                                <i class="bi bi-sim me-1"></i>{{ $device->sim_status ?? 'UNKNOWN' }}
+                                            </span>
+                                        @endif
+                                    </div>
+                                    <!-- CREG Status -->
+                                    <div>
+                                        @php
+                                            $reg = $device->reg_status ?? 'Registered Home';
+                                        @endphp
+                                        @if(str_contains($reg, 'Home') || str_contains($reg, '0,1'))
+                                            <span class="badge bg-success text-white px-2 py-1" style="font-size: 0.75rem;">
+                                                <i class="bi bi-broadcast-pin me-1"></i>+CREG: 0,1
+                                            </span>
+                                        @elseif(str_contains($reg, 'Roaming') || str_contains($reg, '0,5'))
+                                            <span class="badge bg-info text-white px-2 py-1" style="font-size: 0.75rem;">
+                                                <i class="bi bi-globe me-1"></i>+CREG: 0,5
+                                            </span>
+                                        @elseif(str_contains($reg, 'Searching') || str_contains($reg, '0,2'))
+                                            <span class="badge bg-warning text-dark px-2 py-1" style="font-size: 0.75rem;">
+                                                <i class="bi bi-arrow-repeat me-1"></i>Mencari...
+                                            </span>
+                                        @else
+                                            <span class="badge bg-secondary text-white px-2 py-1" style="font-size: 0.75rem;">
+                                                {{ $reg }}
+                                            </span>
+                                        @endif
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
                                 @if(!is_null($device->signal))
                                     <div class="d-flex align-items-center gap-2">
-                                        <div class="progress flex-grow-1" style="height: 6px; min-width: 60px;">
+                                        <div class="progress flex-grow-1" style="height: 6px; min-width: 50px;">
                                             <div class="progress-bar {{ $device->signal > 15 ? 'bg-success' : ($device->signal > 8 ? 'bg-warning' : 'bg-danger') }}" 
                                                  role="progressbar" 
                                                  style="width: {{ min(100, round(($device->signal / 31) * 100)) }}%"></div>
@@ -97,8 +145,16 @@
                             </td>
                             <td class="text-end">
                                 <div class="btn-group btn-group-sm">
+                                    <!-- Tarik SMS dari SIM Button -->
+                                    <form action="{{ route('devices.sync-sms', $device) }}" method="POST" class="d-inline" onsubmit="return confirm('Kirim perintah tarik seluruh SMS tersimpan di kartu SIM {{ $device->name }}?');">
+                                        @csrf
+                                        <button type="submit" class="btn btn-light border text-primary" title="Tarik SMS dari Memori Kartu SIM (Sync SIM)">
+                                            <i class="bi bi-cloud-arrow-down-fill"></i>
+                                        </button>
+                                    </form>
+
                                     <!-- GSM Debug Console Button -->
-                                    <a href="{{ route('devices.show', $device) }}" class="btn btn-light border text-primary" title="GSM Live Terminal & Debugging">
+                                    <a href="{{ route('devices.show', $device) }}" class="btn btn-light border text-success" title="GSM Live Terminal & Debugging">
                                         <i class="bi bi-terminal-fill"></i>
                                     </a>
 
@@ -135,7 +191,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="8" class="text-center py-4 text-muted">
+                            <td colspan="9" class="text-center py-4 text-muted">
                                 <i class="bi bi-router fs-2 d-block mb-2"></i>
                                 Tidak ada device ditemukan.
                             </td>
@@ -258,3 +314,4 @@
     });
 </script>
 @endpush
+

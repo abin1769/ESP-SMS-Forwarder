@@ -5,9 +5,22 @@
 
 @section('content')
 
-<!-- Header Filter Card -->
+<!-- Header Filter & Sync Card -->
 <div class="card border-0 shadow-sm rounded-4 mb-4">
     <div class="card-body p-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3 pb-3 border-bottom">
+            <div>
+                <h6 class="fw-bold mb-1"><i class="bi bi-inbox-fill text-primary me-2"></i>Pencarian & Sinkronisasi Pesan</h6>
+                <p class="text-muted mb-0 small">Filter pesan masuk atau tarik pesan yang tersimpan di memori kartu SIM dari perangkat ESP32.</p>
+            </div>
+            <div>
+                <!-- Button Trigger Modal Tarik SMS dari SIM -->
+                <button type="button" class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#syncSimModal">
+                    <i class="bi bi-cloud-arrow-down-fill me-1"></i> Tarik Pesan dari SIM
+                </button>
+            </div>
+        </div>
+
         <form method="GET" action="{{ route('sms.index') }}" class="row g-3 align-items-end">
             <!-- Search Keyword -->
             <div class="col-12 col-md-4">
@@ -53,7 +66,7 @@
 <!-- SMS Table Card -->
 <div class="card border-0 shadow-sm rounded-4">
     <div class="card-header bg-white border-0 pt-4 px-4 pb-2 d-flex justify-content-between align-items-center">
-        <h6 class="fw-bold m-0"><i class="bi bi-inbox-fill text-primary me-2"></i>Daftar Inbox SMS</h6>
+        <h6 class="fw-bold m-0"><i class="bi bi-envelope-paper-fill text-primary me-2"></i>Daftar Inbox SMS Diterima</h6>
         <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2">
             Total: {{ $smsList->total() }} SMS
         </span>
@@ -172,6 +185,46 @@
     </div>
 </div>
 
+<!-- Modal Tarik Pesan dari SIM (Sync SIM) -->
+<div class="modal fade" id="syncSimModal" tabindex="-1" aria-labelledby="syncSimModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="syncSimModalLabel">
+                    <i class="bi bi-cloud-arrow-down-fill text-primary me-2"></i>Tarik Pesan dari Kartu SIM
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ route('sms.sync-sim') }}" method="POST">
+                @csrf
+                <div class="modal-body">
+                    <p class="text-muted small">
+                        Perintah ini akan menginstruksikan ESP32 untuk membaca seluruh SMS yang tersimpan di memori kartu SIM (<code>AT+CMGL="ALL"</code>) dan meneruskannya ke web.
+                    </p>
+                    <div class="mb-3">
+                        <label for="sync_device_id" class="form-label fw-semibold">Pilih Device Gateway ESP32</label>
+                        <select name="device_id" id="sync_device_id" class="form-select">
+                            <option value="">Semua Perangkat Gateway (Broadcast Sync)</option>
+                            @foreach($devices as $device)
+                                <option value="{{ $device->id }}">{{ $device->name }} ({{ $device->operator ?? 'No SIM' }}) - {{ $device->is_online ? 'ONLINE' : 'OFFLINE' }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="alert alert-info border-0 p-3 mb-0 small">
+                        <i class="bi bi-info-circle-fill me-1"></i> ESP32 akan mengeksekusi penarikan pesan pada siklus heartbeat berikutnya dan pesan yang berhasil ditarik akan langsung masuk ke tabel ini.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-cloud-arrow-down-fill me-1"></i> Mulai Tarik SMS
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal View Detail SMS -->
 <div class="modal fade" id="viewSmsModal" tabindex="-1" aria-labelledby="viewSmsModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -242,3 +295,4 @@
     });
 </script>
 @endpush
+
