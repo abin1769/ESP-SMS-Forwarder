@@ -18,6 +18,7 @@ void setup() {
     Serial.println("\n==================================================");
     Serial.println("  ESP32-S3 SIM800L SMS Gateway Starting...");
     Serial.println("==================================================");
+    Serial.println("[Setup] Menginisialisasi WiFi, Modul GSM SIM800L, dan API Client...");
 
     wifi.begin(WIFI_SSID, WIFI_PASSWORD);
     gsm.begin(&Serial2, SIM800_RX, SIM800_TX, SIM800_BAUD);
@@ -45,29 +46,58 @@ void loop() {
         bool hbSuccess = api.heartbeat(signal, opName, simStatus, regStatus, pendingCmd);
 
         if (hbSuccess && pendingCmd.length() > 0) {
-            Serial.println("\n[Remote Console] Received AT Command from Web:");
+            Serial.println("\n[Remote Console] Menerima Perintah dari Web:");
             Serial.println("> " + pendingCmd);
 
-            String result = gsm.executeCustomAT(pendingCmd, 3000);
+            // Cek jika perintah adalah penarikan pesan tersimpan di kartu SIM (SYNC_SIM_SMS)
+            if (pendingCmd == "SYNC_SIM_SMS" || pendingCmd == "PULL_SMS") {
+                Serial.println("[Remote Console] Menjalankan Penarikan Seluruh SMS dari Memori Kartu SIM...");
+                
+                int pulledCount = gsm.syncStoredSMS(true);
 
-            Serial.println("[Remote Console] SIM800L Execution Result:");
-            Serial.println(result);
+                // Kirim seluruh SMS yang ditarik ke API Laravel
+                int forwardedCount = 0;
+                while (gsm.hasNewSMS()) {
+                    SMSMessage sms = gsm.readSMS();
+                    if (api.sendSMS(sms)) {
+                        forwardedCount++;
+                    }
+                }
 
-            // Report execution result back to Laravel Web Console
-            api.sendATResponse(pendingCmd, result);
+                String syncResult = "[SYNC_SIM_SMS OK] Berhasil menarik " + String(pulledCount) + 
+                                    " pesan dari memori kartu SIM dan meneruskan " + String(forwardedCount) + 
+                                    " pesan ke database Laravel.";
+                
+                Serial.println("[Remote Console] " + syncResult);
+                api.sendATResponse(pendingCmd, syncResult);
+
+            } else {
+                // Eksekusi AT Command kustom umum
+                String result = gsm.executeCustomAT(pendingCmd, 4000);
+
+                Serial.println("[Remote Console] Hasil Eksekusi SIM800L:");
+                Serial.println(result);
+
+                // Kirim hasil eksekusi kembali ke Web Console Laravel
+                api.sendATResponse(pendingCmd, result);
+            }
         }
     }
 
-    // 3. SMS Detection & Forwarding Flow
+    // 3. SMS Detection & Forwarding Flow (Real-time incoming SMS)
     if (gsm.hasNewSMS()) {
         SMSMessage sms = gsm.readSMS();
 
+        Serial.printf("\n[Forwarder] Meneruskan SMS dari %s ke Laravel API...\n", sms.phone.c_str());
+
         if (wifi.isConnected() && api.sendSMS(sms)) {
             gsm.deleteSMS(sms.index);
+            Serial.printf("[Forwarder] SMS #%d berhasil disimpan ke Web dan dihapus dari SIM.\n", sms.index);
         } else {
-            Serial.println("[System]\nAPI error or WiFi disconnected. SMS retained on SIM for retry.");
+            Serial.println("[Forwarder Warning] API error atau WiFi terputus. SMS tetap disimpan di SIM untuk dicoba ulang.");
         }
     }
 
     delay(10); // Yield to system tasks
 }
+

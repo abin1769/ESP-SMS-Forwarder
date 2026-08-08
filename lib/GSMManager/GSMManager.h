@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include <queue>
+#include <vector>
 
 struct SMSMessage {
     int index;
@@ -30,16 +31,25 @@ private:
     GSMState _state;
     unsigned long _lastStateTimer;
     unsigned long _lastHealthCheck;
+    unsigned long _lastRegistrationCheck;
     
+    // Status tracking for state change logging
+    int _lastCregCode;
+    String _lastSimStatus;
+    int _lastCsq;
+    String _lastOperator;
+    bool _hasAnnouncedRegistration;
+
     std::queue<int> _pendingSMSIndexes;
     std::queue<SMSMessage> _smsQueue;
 
-    // Internal AT Command helper
+    // Internal AT Command helpers
     String sendCommand(String command, uint32_t timeout = 2000);
     bool waitForResponse(String target, uint32_t timeout = 2000);
 
     // Parsing helpers
     SMSMessage parseCMGRResponse(int index, String rawResponse);
+    void parseCMGLResponse(String rawResponse);
 
 public:
     GSMManager();
@@ -50,11 +60,24 @@ public:
     SMSMessage readSMS();
     bool deleteSMS(int index);
     bool sendSMS(String number, String message);
+
+    // Diagnostics & Signal/Registration monitoring
     int getSignal();
+    int getSignalDbm();
+    String getSignalQualityText();
     String getOperator();
     String getSIMStatus();
     String getRegistrationStatus();
+    int getRegistrationCode();
+    bool isNetworkRegistered();
+    void logStatusSummary();
+
+    // Pull / Sync SMS stored on SIM card memory
+    int syncStoredSMS(bool deleteAfterRead = true);
+
+    // Remote AT Command execution
     String executeCustomAT(String command, uint32_t timeout = 3000);
 };
 
 #endif // GSM_MANAGER_H
+

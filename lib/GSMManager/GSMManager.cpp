@@ -8,6 +8,12 @@ GSMManager::GSMManager() {
     _state = GSM_STATE_UNINITIALIZED;
     _lastStateTimer = 0;
     _lastHealthCheck = 0;
+    _lastRegistrationCheck = 0;
+    _lastCregCode = -1;
+    _lastSimStatus = "";
+    _lastCsq = -1;
+    _lastOperator = "";
+    _hasAnnouncedRegistration = false;
 }
 
 bool GSMManager::begin(HardwareSerial* serialPort, int rxPin, int txPin, long baudRate) {
@@ -18,7 +24,9 @@ bool GSMManager::begin(HardwareSerial* serialPort, int rxPin, int txPin, long ba
 
     _serial->begin(_baudRate, SERIAL_8N1, _rxPin, _txPin);
     
-    Serial.println("[GSM]\nInitializing...");
+    Serial.println("\n[GSM Boot] ==================================================");
+    Serial.println("[GSM Boot] Inisialisasi Serial GSM SIM800L (Baud: 9600)...");
+    Serial.println("[GSM Boot] ==================================================");
     _state = GSM_STATE_CHECK_AT;
     _lastStateTimer = millis();
 
@@ -72,6 +80,59 @@ bool GSMManager::waitForResponse(String target, uint32_t timeout) {
     return false;
 }
 
+int GSMManager::getRegistrationCode() {
+    String resp = sendCommand("AT+CREG?", 1500);
+    int idx = resp.indexOf("+CREG:");
+    if (idx != -1) {
+        String sub = resp.substring(idx + 6);
+        int commaIdx = sub.indexOf(",");
+        if (commaIdx != -1) {
+            return sub.substring(commaIdx + 1, commaIdx + 2).toInt();
+        }
+    }
+    return -1;
+}
+
+bool GSMManager::isNetworkRegistered() {
+    int code = getRegistrationCode();
+    return (code == 1 || code == 5);
+}
+
+int GSMManager::getSignalDbm() {
+    int csq = getSignal();
+    if (csq == 0) return -113;
+    if (csq == 1) return -111;
+    if (csq >= 2 && csq <= 30) return -113 + (csq * 2);
+    if (csq == 31) return -51;
+    return -999; // Unknown
+}
+
+String GSMManager::getSignalQualityText() {
+    int csq = getSignal();
+    if (csq >= 20 && csq <= 31) return "Sangat Baik (Excellent)";
+    if (csq >= 15 && csq < 20) return "Baik (Good)";
+    if (csq >= 10 && csq < 15) return "Cukup (Moderate)";
+    if (csq >= 1 && csq < 10) return "Lemah (Marginal)";
+    return "Tidak Ada Sinyal / Belum Terdeteksi";
+}
+
+void GSMManager::logStatusSummary() {
+    String sim = getSIMStatus();
+    int csq = getSignal();
+    int dbm = getSignalDbm();
+    String reg = getRegistrationStatus();
+    String op = getOperator();
+
+    Serial.println("\n--------------------------------------------------");
+    Serial.println("  [DIAGNOSTIK MODUL GSM SIM800L & KARTU SIM]");
+    Serial.println("--------------------------------------------------");
+    Serial.printf("  1. Keadaan SIM Card     : %s\n", sim.c_str());
+    Serial.printf("  2. Kuat Sinyal CSQ      : %d/31 (%d dBm) - %s\n", csq, dbm, getSignalQualityText().c_str());
+    Serial.printf("  3. Registrasi Jaringan  : %s\n", reg.c_str());
+    Serial.printf("  4. Operator Seluler     : %s\n", op.c_str());
+    Serial.println("--------------------------------------------------\n");
+}
+
 void GSMManager::update() {
     if (!_serial) return;
 
@@ -85,35 +146,105 @@ void GSMManager::update() {
         case GSM_STATE_CHECK_AT: {
             String resp = sendCommand("AT", 1000);
             if (resp.indexOf("OK") != -1) {
+                Serial.println("[GSM Boot] Modul SIM800L merespon AT (OK).");
                 _state = GSM_STATE_CONFIGURING;
                 _lastStateTimer = currentMillis;
-            } else if (currentMillis - _lastStateTimer > 10000) {
-                Serial.println("[GSM]\nError: SIM800L not responding. Retrying...");
+            } else if (currentMillis - _lastStateTimer > 8000) {
+                Serial.println("[GSM Warning] Menunggu respon AT dari SIM800L... Cek kabel TX/RX & Power Supply.");
                 _lastStateTimer = currentMillis;
             }
             break;
         }
 
         case GSM_STATE_CONFIGURING: {
-            sendCommand("ATE0", 1000);                // Disable Echo
-            sendCommand("AT+CMGF=1", 1000);            // Text Mode
-            sendCommand("AT+CNMI=2,2,0,0,0", 1000);    // Immediate SMS notification
+            sendCommand("ATE0", 1000); // Disable Echo
 
-            Serial.println("[GSM]\nSIM800L Ready");
+            // 1. Memeriksa keadaan SIM Card
+            String simResp = getSIMStatus();
+            _lastSimStatus = simResp;
+            if (simResp == "READY") {
+                Serial.println("\n[GSM SIM] ==================================================");
+                Serial.println("[GSM SIM] Status Kartu SIM: READY (SIM terpasang & aktif)");
+                Serial.println("[GSM SIM] ==================================================");
+            } else {
+                Serial.printf("\n[GSM SIM Warning] Status SIM: %s (Periksa pemasangan kartu SIM / PIN)\n", simResp.c_str());
+            }
+
+            // 2. Konfigurasi SMS Mode & Storage SIM Card
+            sendCommand("AT+CMGF=1", 1000);                    // SMS Text Mode
+            sendCommand("AT+CPMS=\"SM\",\"SM\",\"SM\"", 1000); // Set SMS storage ke memori Kartu SIM (SM)
+            sendCommand("AT+CNMI=2,2,0,0,0", 1000);            // Notifikasi SMS masuk langsung
+
+            Serial.println("[GSM Boot] Konfigurasi SMS Text Mode & Penyimpanan Memori SIM (SM) Selesai.");
+            Serial.println("[GSM Boot] Memulai pemantauan registrasi jaringan dan sinyal seluler...\n");
+
             _state = GSM_STATE_READY;
             _lastHealthCheck = currentMillis;
+            _lastRegistrationCheck = 0; // Trigger immediate registration check
             break;
         }
 
         case GSM_STATE_READY: {
+            // Periodic network registration and signal status monitoring (every 5-10s)
+            if (currentMillis - _lastRegistrationCheck >= 5000) {
+                _lastRegistrationCheck = currentMillis;
+
+                int cregCode = getRegistrationCode();
+                int currentCsq = getSignal();
+
+                // Log state transitions in registration
+                if (cregCode != _lastCregCode || !_hasAnnouncedRegistration) {
+                    _lastCregCode = cregCode;
+
+                    if (cregCode == 1) { // +CREG: 0,1 (Registered Home)
+                        _hasAnnouncedRegistration = true;
+                        String op = getOperator();
+                        int dbm = (currentCsq >= 2 && currentCsq <= 30) ? (-113 + (currentCsq * 2)) : -113;
+
+                        Serial.println("\n================================================================================");
+                        Serial.println("  [GSM NOTIFIKASI] >> TERHUBUNG KE SINYAL JARINGAN! (+CREG: 0,1) <<");
+                        Serial.println("================================================================================");
+                        Serial.println("  ✓ Status Registrasi : Terhubung Jaringan Utama (Registered Home)");
+                        Serial.printf("  ✓ Kuat Sinyal CSQ   : %d/31 (%d dBm) [%s]\n", currentCsq, dbm, getSignalQualityText().c_str());
+                        Serial.printf("  ✓ Operator Provider : %s\n", op.c_str());
+                        Serial.println("================================================================================\n");
+
+                        // Otomatis tarik pesan yang tersimpan di memori SIM saat pertama kali terhubung ke jaringan
+                        Serial.println("[GSM Auto-Sync] Memeriksa apakah ada SMS yang tersimpan di kartu SIM...");
+                        syncStoredSMS(true);
+
+                    } else if (cregCode == 5) { // +CREG: 0,5 (Registered Roaming)
+                        _hasAnnouncedRegistration = true;
+                        String op = getOperator();
+                        Serial.println("\n================================================================================");
+                        Serial.println("  [GSM NOTIFIKASI] >> TERHUBUNG KE SINYAL JARINGAN (Roaming) (+CREG: 0,5) <<");
+                        Serial.printf("  ✓ Status: Roaming | Kuat Sinyal: %d/31 | Operator: %s\n", currentCsq, op.c_str());
+                        Serial.println("================================================================================\n");
+
+                        syncStoredSMS(true);
+
+                    } else if (cregCode == 2) { // +CREG: 0,2 (Searching)
+                        Serial.printf("[GSM Registrasi] +CREG: 0,2 - Sedang mencari sinyal jaringan provider... (CSQ: %d/31)\n", currentCsq);
+                    } else if (cregCode == 0) { // +CREG: 0,0 (Not registered)
+                        Serial.printf("[GSM Registrasi] +CREG: 0,0 - Belum terdaftar ke jaringan seluler. (CSQ: %d/31)\n", currentCsq);
+                    } else if (cregCode == 3) { // +CREG: 0,3 (Registration Denied)
+                        Serial.println("[GSM Warning] +CREG: 0,3 - Registrasi kartu SIM DITOLAK oleh provider (Registration Denied)!");
+                    } else {
+                        Serial.printf("[GSM Registrasi] +CREG status: %d (CSQ: %d/31)\n", cregCode, currentCsq);
+                    }
+                }
+            }
+
             // Periodic health check every 45s
             if (currentMillis - _lastHealthCheck >= 45000) {
                 _lastHealthCheck = currentMillis;
                 String resp = sendCommand("AT", 1000);
                 if (resp.indexOf("OK") == -1) {
-                    Serial.println("[GSM]\nModule unresponsive! Re-initializing...");
+                    Serial.println("[GSM Warning] Modul SIM800L tidak merespon! Memulai re-inisialisasi...");
                     _state = GSM_STATE_CHECK_AT;
                     _lastStateTimer = currentMillis;
+                    _hasAnnouncedRegistration = false;
+                    _lastCregCode = -1;
                     return;
                 }
             }
@@ -122,7 +253,7 @@ void GSMManager::update() {
 
         case GSM_STATE_ERROR:
             if (currentMillis - _lastStateTimer >= 5000) {
-                Serial.println("[GSM]\nAttempting recovery from error state...");
+                Serial.println("[GSM Recovery] Mencoba memulihkan modul dari error state...");
                 _state = GSM_STATE_CHECK_AT;
                 _lastStateTimer = currentMillis;
             }
@@ -136,25 +267,34 @@ void GSMManager::update() {
 
         // 1. Detect SIM800L Power Drop / Hardware Restart (RDY)
         if (line.indexOf("RDY") != -1) {
-            Serial.println("[GSM Warning]\nSIM800L Power Drop / Hardware Restart Detected! (RDY)");
+            Serial.println("[GSM Warning] SIM800L Power Drop / Hardware Restart Terdeteksi! (RDY)");
             _state = GSM_STATE_CHECK_AT; // Trigger automatic re-initialization
             _lastStateTimer = currentMillis;
+            _hasAnnouncedRegistration = false;
+            _lastCregCode = -1;
         }
         // 2. Detect Power Voltage Dip Alarm
         else if (line.indexOf("UNDER-VOLTAGE") != -1) {
-            Serial.println("[GSM Alarm]\nCRITICAL: SIM800L Power Supply Drop Detected! (UNDER-VOLTAGE)");
+            Serial.println("[GSM Alarm] KRITIKAL: Catu daya SIM800L drop di bawah batas minimal! (UNDER-VOLTAGE)");
         }
         // 3. Detect Normal Power Down
         else if (line.indexOf("POWER DOWN") != -1) {
-            Serial.println("[GSM Alarm]\nCRITICAL: SIM800L Power Shutdown! (POWER DOWN)");
+            Serial.println("[GSM Alarm] KRITIKAL: SIM800L Mengalami Shutdown! (POWER DOWN)");
             _state = GSM_STATE_CHECK_AT;
+            _hasAnnouncedRegistration = false;
+            _lastCregCode = -1;
         }
-        // 4. Detect SMS notification: +CMTI: "SM",3
+        // 4. Detect Network Registration URC (+CREG: 1 or +CREG: 5)
+        else if (line.indexOf("+CREG:") != -1) {
+            Serial.printf("[GSM Registrasi Event] %s\n", line.c_str());
+            _lastRegistrationCheck = 0; // Trigger immediate evaluation
+        }
+        // 5. Detect SMS notification: +CMTI: "SM",3
         else if (line.indexOf("+CMTI:") != -1) {
             int commaIdx = line.indexOf(",", line.indexOf("+CMTI:"));
             if (commaIdx != -1) {
                 int smsIndex = line.substring(commaIdx + 1).toInt();
-                Serial.println("[GSM]\nSMS detected");
+                Serial.printf("\n[GSM Notifikasi] SMS Masuk Baru Terdeteksi pada Memori SIM Index #%d!\n", smsIndex);
                 _pendingSMSIndexes.push(smsIndex);
             }
         }
@@ -165,28 +305,25 @@ void GSMManager::update() {
         int targetIdx = _pendingSMSIndexes.front();
         _pendingSMSIndexes.pop();
 
-        // Give SIM800L 200ms to settle memory index write
-        delay(200);
+        delay(150);
 
         String raw = sendCommand("AT+CMGR=" + String(targetIdx), 3000);
-        
-        Serial.println("[GSM] Debug CMGR Raw Response:");
-        Serial.println(raw);
 
         if (raw.indexOf("+CMGR:") != -1) {
             SMSMessage msg = parseCMGRResponse(targetIdx, raw);
             if (msg.phone.length() > 0) {
-                Serial.println("[GSM]\nPhone:");
-                Serial.println(msg.phone);
-                Serial.println("[GSM]\nMessage:");
-                Serial.println(msg.message);
+                Serial.println("\n[GSM SMS Diterima]");
+                Serial.printf("  Index   : #%d\n", msg.index);
+                Serial.printf("  Pengirim: %s\n", msg.phone.c_str());
+                Serial.printf("  Waktu   : %s\n", msg.datetime.c_str());
+                Serial.printf("  Pesan   : %s\n\n", msg.message.c_str());
 
                 _smsQueue.push(msg);
             } else {
-                Serial.println("[GSM]\nParsing failed. Skipping SMS.");
+                Serial.println("[GSM Warning] Parsing SMS gagal. Melewati index.");
             }
         } else {
-            Serial.println("[GSM]\nFailed to read SMS index. Skipping.");
+            Serial.println("[GSM Warning] Gagal membaca SMS dari index memory.");
         }
     }
 }
@@ -214,7 +351,7 @@ SMSMessage GSMManager::parseCMGRResponse(int index, String raw) {
         sms.phone.trim();
     }
 
-    // Locate timestamp quotes (5th & 6th or 7th & 8th)
+    // Locate timestamp quotes
     int fifthQuote = raw.indexOf("\"", fourthQuote + 1);
     int sixthQuote = raw.indexOf("\"", fifthQuote + 1);
     int seventhQuote = raw.indexOf("\"", sixthQuote + 1);
@@ -228,7 +365,6 @@ SMSMessage GSMManager::parseCMGRResponse(int index, String raw) {
     }
 
     if (rawTime.length() >= 17) {
-        // Convert "YY/MM/DD,HH:MM:SS+TZ" to "20YY-MM-DD HH:MM:SS"
         String year = "20" + rawTime.substring(0, 2);
         String month = rawTime.substring(3, 5);
         String day = rawTime.substring(6, 8);
@@ -251,6 +387,121 @@ SMSMessage GSMManager::parseCMGRResponse(int index, String raw) {
     return sms;
 }
 
+int GSMManager::syncStoredSMS(bool deleteAfterRead) {
+    Serial.println("\n[GSM SIM Storage] ==================================================");
+    Serial.println("[GSM SIM Storage] Membaca semua pesan yang tersimpan di kartu SIM...");
+    Serial.println("[GSM SIM Storage] Mengirim perintah AT+CMGL=\"ALL\"...");
+
+    // Pastikan storage mengarah ke memori SIM
+    sendCommand("AT+CMGF=1", 1000);
+    sendCommand("AT+CPMS=\"SM\",\"SM\",\"SM\"", 1000);
+
+    String rawList = sendCommand("AT+CMGL=\"ALL\"", 6000);
+
+    if (rawList.indexOf("+CMGL:") == -1) {
+        Serial.println("[GSM SIM Storage] Memori kartu SIM kosong. Tidak ada pesan tersimpan.");
+        Serial.println("[GSM SIM Storage] ==================================================\n");
+        return 0;
+    }
+
+    int count = 0;
+    int currentPos = 0;
+
+    while (true) {
+        int cmglPos = rawList.indexOf("+CMGL:", currentPos);
+        if (cmglPos == -1) break;
+
+        // Parse Index: +CMGL: <index>, ...
+        int colonPos = rawList.indexOf(":", cmglPos);
+        int commaPos = rawList.indexOf(",", colonPos);
+        if (commaPos == -1) break;
+
+        int index = rawList.substring(colonPos + 1, commaPos).toInt();
+
+        // Cari batas akhir baris header
+        int headerEnd = rawList.indexOf("\n", cmglPos);
+        if (headerEnd == -1) break;
+
+        String headerLine = rawList.substring(cmglPos, headerEnd);
+
+        // Cari nomor pengirim (phone)
+        int quote1 = headerLine.indexOf("\"");
+        int quote2 = headerLine.indexOf("\"", quote1 + 1);
+        int quote3 = headerLine.indexOf("\"", quote2 + 1);
+        int quote4 = headerLine.indexOf("\"", quote3 + 1);
+
+        String phone = "";
+        if (quote3 != -1 && quote4 != -1) {
+            phone = headerLine.substring(quote3 + 1, quote4);
+            phone.trim();
+        }
+
+        // Cari timestamp
+        int quote5 = headerLine.indexOf("\"", quote4 + 1);
+        int quote6 = headerLine.indexOf("\"", quote5 + 1);
+        int quote7 = headerLine.indexOf("\"", quote6 + 1);
+        int quote8 = headerLine.indexOf("\"", quote7 + 1);
+
+        String rawTime = "";
+        if (quote7 != -1 && quote8 != -1) {
+            rawTime = headerLine.substring(quote7 + 1, quote8);
+        } else if (quote5 != -1 && quote6 != -1) {
+            rawTime = headerLine.substring(quote5 + 1, quote6);
+        }
+
+        String datetime = "";
+        if (rawTime.length() >= 17) {
+            String year = "20" + rawTime.substring(0, 2);
+            String month = rawTime.substring(3, 5);
+            String day = rawTime.substring(6, 8);
+            String time = rawTime.substring(9, 17);
+            datetime = year + "-" + month + "-" + day + " " + time;
+        }
+
+        // Cari isi body pesan hingga baris +CMGL: berikutnya atau OK
+        int nextCmgl = rawList.indexOf("+CMGL:", headerEnd + 1);
+        int okPos = rawList.indexOf("OK", headerEnd + 1);
+
+        int bodyEnd = rawList.length();
+        if (nextCmgl != -1 && (okPos == -1 || nextCmgl < okPos)) {
+            bodyEnd = nextCmgl;
+        } else if (okPos != -1) {
+            bodyEnd = okPos;
+        }
+
+        String body = rawList.substring(headerEnd + 1, bodyEnd);
+        body.trim();
+
+        if (phone.length() > 0 && body.length() > 0) {
+            SMSMessage msg;
+            msg.index = index;
+            msg.phone = phone;
+            msg.message = body;
+            msg.datetime = datetime;
+
+            Serial.printf("  [SIM SMS #%d] Dari: %s | Waktu: %s\n", index, phone.c_str(), datetime.c_str());
+            Serial.printf("  [Isi Pesan]   : %s\n", body.c_str());
+
+            _smsQueue.push(msg);
+            count++;
+
+            // Jika deleteAfterRead aktif, hapus dari SIM card agar memori tidak penuh
+            if (deleteAfterRead) {
+                deleteSMS(index);
+                Serial.printf("  [Hapus Memori]: SMS #%d berhasil dihapus dari kartu SIM.\n", index);
+            }
+        }
+
+        currentPos = (nextCmgl != -1) ? nextCmgl : (okPos != -1 ? okPos + 2 : rawList.length());
+        if (nextCmgl == -1) break;
+    }
+
+    Serial.printf("[GSM SIM Storage] Selesai! Berhasil menarik %d pesan tersimpan dari kartu SIM.\n", count);
+    Serial.println("[GSM SIM Storage] ==================================================\n");
+
+    return count;
+}
+
 bool GSMManager::hasNewSMS() {
     return !_smsQueue.empty();
 }
@@ -271,10 +522,8 @@ bool GSMManager::deleteSMS(int index) {
     String resp = sendCommand(cmd, 2000);
     bool success = (resp.indexOf("OK") != -1);
 
-    if (success) {
-        Serial.println("[GSM]\nDelete success");
-    } else {
-        Serial.printf("[GSM]\nDelete failed for SMS #%d\n", index);
+    if (!success) {
+        Serial.printf("[GSM] Gagal menghapus SMS #%d dari kartu SIM.\n", index);
     }
     return success;
 }
@@ -334,27 +583,20 @@ String GSMManager::getSIMStatus() {
 }
 
 String GSMManager::getRegistrationStatus() {
-    String resp = sendCommand("AT+CREG?", 1500);
-    int idx = resp.indexOf("+CREG:");
-    if (idx != -1) {
-        String sub = resp.substring(idx + 6);
-        int commaIdx = sub.indexOf(",");
-        if (commaIdx != -1) {
-            int stat = sub.substring(commaIdx + 1, commaIdx + 2).toInt();
-            switch (stat) {
-                case 1: return "Registered Home";
-                case 2: return "Searching";
-                case 3: return "Registration Denied";
-                case 4: return "Unknown";
-                case 5: return "Registered Roaming";
-                default: return "Not Registered";
-            }
-        }
+    int stat = getRegistrationCode();
+    switch (stat) {
+        case 1: return "Registered Home (+CREG: 0,1)";
+        case 2: return "Searching (+CREG: 0,2)";
+        case 3: return "Registration Denied (+CREG: 0,3)";
+        case 4: return "Unknown (+CREG: 0,4)";
+        case 5: return "Registered Roaming (+CREG: 0,5)";
+        case 0: return "Not Registered (+CREG: 0,0)";
+        default: return "UNKNOWN";
     }
-    return "UNKNOWN";
 }
 
 String GSMManager::executeCustomAT(String command, uint32_t timeout) {
     command.trim();
     return sendCommand(command, timeout);
 }
+
