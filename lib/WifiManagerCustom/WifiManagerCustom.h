@@ -3,20 +3,54 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include <Preferences.h>
+#include "config.h"
 
 class WifiManagerCustom {
 private:
-    const char* _ssid;
-    const char* _password;
+    String _ssid;
+    String _password;
+    String _apiUrl;
+    String _deviceToken;
+    bool   _isConfigured;
+
     unsigned long _lastReconnectAttempt;
-    const unsigned long RECONNECT_INTERVAL = 10000; // Try reconnecting every 10s
+    unsigned long _buttonPressStart;
+    bool          _inPortalMode;
+
+    WebServer   _server;
+    DNSServer   _dnsServer;
+    Preferences _prefs;
+
+    const unsigned long RECONNECT_INTERVAL = 10000; // Coba reconnect setiap 10 detik
+
+    void loadFromPreferences();
+    void saveToPreferences(String ssid, String pass, String apiUrl, String token);
+    void setupWebRoutes(int networkCount);
+    String generatePortalHtml(int networkCount);
+    String generateSuccessHtml(String message, bool restart);
+    bool isIp(String str);
+    String toStringIP(IPAddress ip);
 
 public:
     WifiManagerCustom();
-    void begin(const char* ssid, const char* password);
+
+    void begin();
     void update();
+    void startConfigPortal(bool autoTriggered = false);
+    void resetConfig();
+
     bool isConnected();
-    String getIP();
+    bool isPortalRunning() const { return _inPortalMode; }
+
+    String getSSID() const { return _ssid; }
+    String getApiUrl() const { return _apiUrl; }
+    String getDeviceToken() const { return _deviceToken; }
+    String getIP() const { return WiFi.localIP().toString(); }
+    String getAPIP() const { return WiFi.softAPIP().toString(); }
+    String getMacAddress() const { return WiFi.macAddress(); }
 };
 
 #endif // WIFI_MANAGER_CUSTOM_H

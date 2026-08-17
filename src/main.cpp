@@ -18,15 +18,26 @@ void setup() {
     Serial.println("\n==================================================");
     Serial.println("  ESP32-S3 SIM800L SMS Gateway Starting...");
     Serial.println("==================================================");
-    Serial.println("[Setup] Menginisialisasi WiFi, Modul GSM SIM800L, dan API Client...");
+    Serial.println("[Setup] Menginisialisasi WiFi Manager, SIM800L, dan API Client...");
 
-    wifi.begin(WIFI_SSID, WIFI_PASSWORD);
+    // 1. Inisialisasi WiFi & Web Provisioning Portal (Membaca NVS Flash)
+    wifi.begin();
+
+    // 2. Inisialisasi Modul GSM SIM800L
     gsm.begin(&Serial2, SIM800_RX, SIM800_TX, SIM800_BAUD);
-    api.begin(API_URL, DEVICE_TOKEN);
+
+    // 3. Inisialisasi API Client menggunakan URL Server dan Token dari memori Flash
+    api.begin(wifi.getApiUrl(), wifi.getDeviceToken());
+
+    Serial.println("\n[Setup] Konfigurasi Aktif:");
+    Serial.printf(" - WiFi SSID    : %s\n", wifi.getSSID().c_str());
+    Serial.printf(" - API Server   : %s\n", wifi.getApiUrl().c_str());
+    Serial.printf(" - Device Token : %s\n", wifi.getDeviceToken().c_str());
+    Serial.println("[Setup] Info: Tahan tombol BOOT (GPIO 0) selama 3 detik kapan saja untuk membuka Web Portal Konfigurasi.\n");
 }
 
 void loop() {
-    // 1. Maintain WiFi Connection & Non-blocking GSM State Machine
+    // 1. Maintain WiFi Connection, Web Portal DNS/Server, and BOOT button trigger
     wifi.update();
     gsm.update();
 
@@ -100,4 +111,3 @@ void loop() {
 
     delay(10); // Yield to system tasks
 }
-
